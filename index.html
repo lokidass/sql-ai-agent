@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI SQL Agent</title>
+</head>
+<body>
+    <h2>AI SQL Agent</h2>
+    <input type="text" id="queryInput" placeholder="Enter your question">
+    <button onclick="generateSQL()">Generate SQL</button>
+    <p id="sqlOutput"></p>
+    <button onclick="executeSQL()">Confirm & Execute</button>
+    <p id="resultOutput"></p>
+
+    <script>
+        async function generateSQL() {
+            const query = document.getElementById("queryInput").value;
+            const response = await fetch("http://localhost:3000/query", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ question: query })
+            });
+            const data = await response.json();
+            document.getElementById("sqlOutput").innerText = data.sql;
+        }
+
+        async function executeSQL() {
+            const sqlQuery = document.getElementById("sqlOutput").innerText;
+            const response = await fetch("http://localhost:3000/execute", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sql: sqlQuery })
+            });
+            const data = await response.json();
+            document.getElementById("resultOutput").innerText = JSON.stringify(data.result, null, 2);
+        }
+    </script>
+</body>
+</html>
