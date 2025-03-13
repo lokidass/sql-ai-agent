@@ -4,16 +4,174 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI SQL Agent</title>
+    <style>
+        body {
+            display: flex;
+            font-family: Arial, sans-serif;
+        }
+        #sidebar {
+            width: 250px;
+            padding: 10px;
+            background-color: #f4f4f4;
+            height: 100vh;
+            overflow-y: auto;
+        }
+        #main {
+            flex: 1;
+            padding: 10px;
+        }
+        .database, .table {
+            cursor: pointer;
+            margin: 5px 0;
+        }
+        .table {
+            margin-left: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        #erd {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .mermaid {
+            font-family: Arial, sans-serif;
+        }
+        .mermaid .node rect {
+            fill: #e6f3ff;
+            stroke: #007bff;
+            stroke-width: 2px;
+            border-radius: 5px;
+        }
+        .mermaid .edgePath path {
+            stroke: #333;
+            stroke-width: 2px;
+        }
+        #chatbot {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 300px;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        #chatbotHeader {
+            background-color: #007bff;
+            color: #fff;
+            padding: 10px;
+            text-align: center;
+            font-weight: bold;
+        }
+        #chatbotBody {
+            height: 200px;
+            overflow-y: auto;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+        #chatbotInput {
+            display: flex;
+            padding: 10px;
+            background-color: #fff;
+        }
+        #chatbotInput input {
+            flex: 1;
+            padding: 5px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        #chatbotInput button {
+            margin-left: 10px;
+            padding: 5px 10px;
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .message {
+            margin-bottom: 10px;
+        }
+        .user {
+            text-align: right;
+            color: #007bff;
+        }
+        .bot {
+            text-align: left;
+            color: #333;
+        }
+    </style>
+    <!-- Include Mermaid.js -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <!-- Include Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        mermaid.initialize({ 
+            startOnLoad: true,
+            theme: 'neutral', // Use a neutral theme
+            securityLevel: 'loose', // Allow custom styles
+        });
+    </script>
 </head>
 <body>
-    <h2>AI SQL Agent</h2>
-    <input type="text" id="queryInput" placeholder="Enter your question">
-    <button onclick="generateSQL()">Generate SQL</button>
-    <p id="sqlOutput"></p>
-    <button onclick="executeSQL()">Confirm & Execute</button>
-    <p id="resultOutput"></p>
+    <div id="sidebar">
+        <h3>Databases</h3>
+        <div id="databases"></div>
+    </div>
+    <div id="main">
+        <h2>AI SQL Agent</h2>
+        <input type="text" id="queryInput" placeholder="Enter your question">
+        <button onclick="generateSQL()">Generate SQL</button>
+        <p id="sqlOutput"></p>
+        <button onclick="executeSQL()">Confirm & Execute</button>
+        <h3>Query Results</h3>
+        <div id="resultOutput"></div>
+        <h3>Table Structure</h3>
+        <div id="tableStructure"></div>
+        <h3>ER Diagram</h3>
+        <div id="erd"></div>
+
+        <div id="importSql">
+            <h3>Import SQL File</h3>
+            <input type="file" id="sqlFileInput" accept=".sql">
+            <button onclick="importSQL()">Import SQL File</button>
+            <p id="importStatus"></p>
+        </div>
+    </div>
+
+    <!-- Chatbot Interface -->
+    <div id="chatbot">
+        <div id="chatbotHeader">Chatbot</div>
+        <div id="chatbotBody">
+            <div class="message bot">Hello! I'm here to help you understand your database and queries. Ask me anything!</div>
+        </div>
+        <div id="chatbotInput">
+            <input type="text" id="chatbotMessage" placeholder="Ask me something...">
+            <button onclick="sendChatbotMessage()">Send</button>
+        </div>
+    </div>
 
     <script>
+        let selectedDatabase = null;
+        let currentSQLQuery = null;
+        let currentTable = null;
+        let currentTableStructure = null;
+
         async function generateSQL() {
             const query = document.getElementById("queryInput").value;
             const response = await fetch("http://localhost:3000/query", {
@@ -23,18 +181,184 @@
             });
             const data = await response.json();
             document.getElementById("sqlOutput").innerText = data.sql;
+            currentSQLQuery = data.sql; // Update current SQL query
         }
 
         async function executeSQL() {
+            if (!selectedDatabase) {
+                alert("Please select a database first.");
+                return;
+            }
+
             const sqlQuery = document.getElementById("sqlOutput").innerText;
             const response = await fetch("http://localhost:3000/execute", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ sql: sqlQuery })
+                body: JSON.stringify({ sql: sqlQuery, database: selectedDatabase })
             });
             const data = await response.json();
-            document.getElementById("resultOutput").innerText = JSON.stringify(data.result, null, 2);
+
+            // Display query results in a table format
+            const resultOutput = document.getElementById("resultOutput");
+            if (data.success && data.result.length > 0) {
+                resultOutput.innerHTML = createTable(data.result);
+            } else {
+                resultOutput.innerHTML = "<p>No results found.</p>";
+            }
         }
+
+        async function fetchDatabases() {
+            const response = await fetch("http://localhost:3000/databases");
+            const data = await response.json();
+            const databasesDiv = document.getElementById("databases");
+            databasesDiv.innerHTML = data.databases.map(db => `
+                <div class="database" onclick="selectDatabase('${db}')">${db}</div>
+            `).join("");
+        }
+
+        async function selectDatabase(database) {
+            selectedDatabase = database;
+            fetchTables(database);
+            fetchERD(database); // Fetch and render ERD
+        }
+
+        async function fetchTables(database) {
+            const response = await fetch(`http://localhost:3000/tables/${database}`);
+            const data = await response.json();
+            const databasesDiv = document.getElementById("databases");
+            databasesDiv.innerHTML += data.tables.map(table => `
+                <div class="table" onclick="fetchTableStructure('${database}', '${table}')">${table}</div>
+            `).join("");
+        }
+
+        async function fetchTableStructure(database, table) {
+            const response = await fetch(`http://localhost:3000/table/${database}/${table}`);
+            const data = await response.json();
+
+            // Update current table and structure
+            currentTable = table;
+            currentTableStructure = data.structure;
+
+            // Display table structure in a table format
+            const tableStructure = document.getElementById("tableStructure");
+            if (data.success && data.structure.length > 0) {
+                tableStructure.innerHTML = `
+                    <h4>Table: ${table}</h4>
+                    ${createTable(data.structure)}
+                `;
+            } else {
+                tableStructure.innerHTML = "<p>No structure found.</p>";
+            }
+        }
+
+        async function fetchERD(database) {
+            const response = await fetch(`http://localhost:3000/erd/${database}`);
+            const data = await response.json();
+
+            if (data.success) {
+                const erdDiv = document.getElementById("erd");
+                erdDiv.innerHTML = `<div class="mermaid">${data.erd}</div>`;
+                mermaid.init(); // Render the ERD
+            } else {
+                document.getElementById("erd").innerHTML = "<p>Failed to generate ERD.</p>";
+            }
+        }
+
+        // Helper function to create an HTML table from an array of objects
+        function createTable(data) {
+            if (data.length === 0) return "<p>No data available.</p>";
+
+            const headers = Object.keys(data[0]);
+            const rows = data.map(row => {
+                return `<tr>${headers.map(header => `<td>${row[header]}</td>`).join("")}</tr>`;
+            });
+
+            return `
+                <table>
+                    <thead>
+                        <tr>${headers.map(header => `<th>${header}</th>`).join("")}</tr>
+                    </thead>
+                    <tbody>
+                        ${rows.join("")}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        // Chatbot functionality
+        async function sendChatbotMessage() {
+            const message = document.getElementById("chatbotMessage").value;
+            if (!message) return;
+
+            // Add user message to chat
+            const chatbotBody = document.getElementById("chatbotBody");
+            chatbotBody.innerHTML += `<div class="message user">${message}</div>`;
+
+            // Clear input
+            document.getElementById("chatbotMessage").value = "";
+
+            // Prepare context for the chatbot
+            const context = {
+                database: selectedDatabase,
+                sqlQuery: currentSQLQuery,
+                table: currentTable,
+                tableStructure: currentTableStructure,
+            };
+
+            // Fetch chatbot response
+            const response = await fetch("http://localhost:3000/chatbot", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message, context }),
+            });
+            const data = await response.json();
+
+            // Add bot response to chat
+            if (data.success) {
+                chatbotBody.innerHTML += `<div class="message bot">${data.response}</div>`;
+            } else {
+                chatbotBody.innerHTML += `<div class="message bot">Error: ${data.error}</div>`;
+            }
+
+            // Scroll to bottom of chat
+            chatbotBody.scrollTop = chatbotBody.scrollHeight;
+        }
+
+        // Function to import SQL file
+        async function importSQL() {
+            const fileInput = document.getElementById("sqlFileInput");
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert("Please select an SQL file to upload.");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("sqlFile", file);
+            formData.append("database", selectedDatabase);
+
+            const importStatus = document.getElementById("importStatus");
+
+            try {
+                const response = await fetch("http://localhost:3000/import-sql", {
+                    method: "POST",
+                    body: formData,
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    importStatus.innerText = "SQL file imported and executed successfully.";
+                } else {
+                    importStatus.innerText = `Error: ${data.error}`;
+                }
+            } catch (error) {
+                console.error("Import Error:", error);
+                importStatus.innerText = "Failed to import SQL file.";
+            }
+        }
+
+        fetchDatabases();
     </script>
 </body>
 </html>
