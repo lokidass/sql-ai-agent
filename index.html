@@ -120,6 +120,8 @@
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <!-- Include Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Include SheetJS for Excel export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.4/xlsx.full.min.js"></script>
     <script>
         mermaid.initialize({ 
             startOnLoad: true,
@@ -141,6 +143,28 @@
         <button onclick="executeSQL()">Confirm & Execute</button>
         <h3>Query Results</h3>
         <div id="resultOutput"></div>
+
+        <!-- Export Query Results Section -->
+        <h3>Export Query Results</h3>
+        <button onclick="exportToCSV()">Export to CSV</button>
+        <button onclick="exportToExcel()">Export to Excel</button>
+        <button onclick="exportToJSON()">Export to JSON</button>
+
+        <!-- Data Visualization Section -->
+        <h3>Data Visualization</h3>
+        <label for="chartType">Chart Type:</label>
+        <select id="chartType">
+            <option value="bar">Bar Chart</option>
+            <option value="line">Line Chart</option>
+            <option value="pie">Pie Chart</option>
+        </select>
+        <label for="xAxis">X Axis:</label>
+        <select id="xAxis"></select>
+        <label for="yAxis">Y Axis:</label>
+        <select id="yAxis"></select>
+        <button onclick="renderChart()">Update Chart</button>
+        <canvas id="dataChart" width="400" height="200"></canvas>
+
         <h3>Table Structure</h3>
         <div id="tableStructure"></div>
         <h3>ER Diagram</h3>
@@ -171,49 +195,25 @@
         let currentSQLQuery = null;
         let currentTable = null;
         let currentTableStructure = null;
+        let queryResults = null; // Store query results for chart rendering
 
-        async function generateSQL() {
-            const query = document.getElementById("queryInput").value;
-            const response = await fetch("http://localhost:3000/query", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ question: query })
-            });
-            const data = await response.json();
-            document.getElementById("sqlOutput").innerText = data.sql;
-            currentSQLQuery = data.sql; // Update current SQL query
-        }
-
-        async function executeSQL() {
-            if (!selectedDatabase) {
-                alert("Please select a database first.");
-                return;
-            }
-
-            const sqlQuery = document.getElementById("sqlOutput").innerText;
-            const response = await fetch("http://localhost:3000/execute", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ sql: sqlQuery, database: selectedDatabase })
-            });
-            const data = await response.json();
-
-            // Display query results in a table format
-            const resultOutput = document.getElementById("resultOutput");
-            if (data.success && data.result.length > 0) {
-                resultOutput.innerHTML = createTable(data.result);
-            } else {
-                resultOutput.innerHTML = "<p>No results found.</p>";
-            }
-        }
-
+        // Function to fetch databases
         async function fetchDatabases() {
-            const response = await fetch("http://localhost:3000/databases");
-            const data = await response.json();
-            const databasesDiv = document.getElementById("databases");
-            databasesDiv.innerHTML = data.databases.map(db => `
-                <div class="database" onclick="selectDatabase('${db}')">${db}</div>
-            `).join("");
+            try {
+                const response = await fetch("http://localhost:3000/databases");
+                const data = await response.json();
+
+                if (data.success) {
+                    const databasesDiv = document.getElementById("databases");
+                    databasesDiv.innerHTML = data.databases.map(db => `
+                        <div class="database" onclick="selectDatabase('${db}')">${db}</div>
+                    `).join("");
+                } else {
+                    console.error("Failed to fetch databases:", data.error);
+                }
+            } catch (error) {
+                console.error("Error fetching databases:", error);
+            }
         }
 
         async function selectDatabase(database) {
@@ -264,6 +264,100 @@
             }
         }
 
+        async function generateSQL() {
+            const query = document.getElementById("queryInput").value;
+            const response = await fetch("http://localhost:3000/query", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ question: query })
+            });
+            const data = await response.json();
+            document.getElementById("sqlOutput").innerText = data.sql;
+            currentSQLQuery = data.sql; // Update current SQL query
+        }
+
+        async function executeSQL() {
+            if (!selectedDatabase) {
+                alert("Please select a database first.");
+                return;
+            }
+
+            const sqlQuery = document.getElementById("sqlOutput").innerText;
+            const response = await fetch("http://localhost:3000/execute", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sql: sqlQuery, database: selectedDatabase })
+            });
+            const data = await response.json();
+
+            // Display query results in a table format
+            const resultOutput = document.getElementById("resultOutput");
+            if (data.success && data.result.length > 0) {
+                resultOutput.innerHTML = createTable(data.result);
+                queryResults = data.result; // Store query results for chart rendering
+
+                // Populate X and Y axis dropdowns
+                const columns = Object.keys(data.result[0]);
+                const xAxisSelect = document.getElementById("xAxis");
+                const yAxisSelect = document.getElementById("yAxis");
+
+                xAxisSelect.innerHTML = columns.map((col) => `<option value="${col}">${col}</option>`).join("");
+                yAxisSelect.innerHTML = columns.map((col) => `<option value="${col}">${col}</option>`).join("");
+
+                renderChart(); // Render chart based on query results
+            } else {
+                resultOutput.innerHTML = "<p>No results found.</p>";
+                // Clear the chart if no results
+                const chartCanvas = document.getElementById("dataChart");
+                if (chartCanvas) {
+                    chartCanvas.innerHTML = ""; // Clear the chart
+                }
+            }
+        }
+
+        function renderChart() {
+            const chartCanvas = document.getElementById("dataChart");
+            if (!chartCanvas || !queryResults) return;
+
+            // Destroy existing chart instance if it exists
+            if (window.myChart) {
+                window.myChart.destroy();
+            }
+
+            // Get selected chart type and axes
+            const chartType = document.getElementById("chartType").value;
+            const xAxis = document.getElementById("xAxis").value;
+            const yAxis = document.getElementById("yAxis").value;
+
+            // Extract labels and data from the query results
+            const labels = queryResults.map((row) => row[xAxis]);
+            const dataset = queryResults.map((row) => row[yAxis]);
+
+            // Create a new chart
+            window.myChart = new Chart(chartCanvas, {
+                type: chartType, // Use selected chart type
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: yAxis, // Use Y axis column name as label
+                            data: dataset,
+                            backgroundColor: "rgba(75, 192, 192, 0.2)",
+                            borderColor: "rgba(75, 192, 192, 1)",
+                            borderWidth: 1,
+                        },
+                    ],
+                },
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                        },
+                    },
+                },
+            });
+        }
+
         // Helper function to create an HTML table from an array of objects
         function createTable(data) {
             if (data.length === 0) return "<p>No data available.</p>";
@@ -283,6 +377,58 @@
                     </tbody>
                 </table>
             `;
+        }
+
+        // Export to CSV
+        function exportToCSV() {
+            if (!queryResults || queryResults.length === 0) {
+                alert("No query results to export.");
+                return;
+            }
+
+            const headers = Object.keys(queryResults[0]);
+            const csvContent = [
+                headers.join(","), // Header row
+                ...queryResults.map(row => headers.map(header => row[header]).join(","))
+            ].join("\n");
+
+            const blob = new Blob([csvContent], { type: "text/csv" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "query_results.csv";
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // Export to Excel
+        function exportToExcel() {
+            if (!queryResults || queryResults.length === 0) {
+                alert("No query results to export.");
+                return;
+            }
+
+            const worksheet = XLSX.utils.json_to_sheet(queryResults);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Query Results");
+            XLSX.writeFile(workbook, "query_results.xlsx");
+        }
+
+        // Export to JSON
+        function exportToJSON() {
+            if (!queryResults || queryResults.length === 0) {
+                alert("No query results to export.");
+                return;
+            }
+
+            const jsonContent = JSON.stringify(queryResults, null, 2);
+            const blob = new Blob([jsonContent], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "query_results.json";
+            a.click();
+            URL.revokeObjectURL(url);
         }
 
         // Chatbot functionality
@@ -358,6 +504,7 @@
             }
         }
 
+        // Call fetchDatabases on page load
         fetchDatabases();
     </script>
 </body>
