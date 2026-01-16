@@ -1,511 +1,437 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI SQL Agent</title>
-    <style>
-        body {
-            display: flex;
-            font-family: Arial, sans-serif;
-        }
-        #sidebar {
-            width: 250px;
-            padding: 10px;
-            background-color: #f4f4f4;
-            height: 100vh;
-            overflow-y: auto;
-        }
-        #main {
-            flex: 1;
-            padding: 10px;
-        }
-        .database, .table {
-            cursor: pointer;
-            margin: 5px 0;
-        }
-        .table {
-            margin-left: 20px;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 10px;
-        }
-        th, td {
-            border: 1px solid #ddd;
-            padding: 8px;
-            text-align: left;
-        }
-        th {
-            background-color: #f2f2f2;
-        }
-        #erd {
-            margin-top: 20px;
-            padding: 10px;
-            background-color: #f9f9f9;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-        }
-        .mermaid {
-            font-family: Arial, sans-serif;
-        }
-        .mermaid .node rect {
-            fill: #e6f3ff;
-            stroke: #007bff;
-            stroke-width: 2px;
-            border-radius: 5px;
-        }
-        .mermaid .edgePath path {
-            stroke: #333;
-            stroke-width: 2px;
-        }
-        #chatbot {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            width: 300px;
-            background-color: #fff;
-            border: 1px solid #ddd;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-            border-radius: 10px;
-            overflow: hidden;
-        }
-        #chatbotHeader {
-            background-color: #007bff;
-            color: #fff;
-            padding: 10px;
-            text-align: center;
-            font-weight: bold;
-        }
-        #chatbotBody {
-            height: 200px;
-            overflow-y: auto;
-            padding: 10px;
-            background-color: #f9f9f9;
-        }
-        #chatbotInput {
-            display: flex;
-            padding: 10px;
-            background-color: #fff;
-        }
-        #chatbotInput input {
-            flex: 1;
-            padding: 5px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-        }
-        #chatbotInput button {
-            margin-left: 10px;
-            padding: 5px 10px;
-            background-color: #007bff;
-            color: #fff;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-        .message {
-            margin-bottom: 10px;
-        }
-        .user {
-            text-align: right;
-            color: #007bff;
-        }
-        .bot {
-            text-align: left;
-            color: #333;
-        }
-    </style>
+    <title>SQL AI Agent | Multi-DB Intelligence</title>
+    <link rel="stylesheet" href="index.css">
     <!-- Include Mermaid.js -->
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <!-- Include Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Include SheetJS for Excel export -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.4/xlsx.full.min.js"></script>
-    <script>
-        mermaid.initialize({ 
-            startOnLoad: true,
-            theme: 'neutral', // Use a neutral theme
-            securityLevel: 'loose', // Allow custom styles
-        });
-    </script>
 </head>
+
 <body>
     <div id="sidebar">
-        <h3>Databases</h3>
-        <div id="databases"></div>
+        <h3><span class="icon">📦</span> Databases</h3>
+        <div id="databasesList" class="db-list">
+            <!-- Dynamically populated -->
+        </div>
+        <button id="btnConnect" class="secondary" style="margin-top: 20px; width: 100%;">
+            <span>🔌</span> Connect New DB
+        </button>
     </div>
+
     <div id="main">
-        <h2>AI SQL Agent</h2>
-        <input type="text" id="queryInput" placeholder="Enter your question">
-        <button onclick="generateSQL()">Generate SQL</button>
-        <p id="sqlOutput"></p>
-        <button onclick="executeSQL()">Confirm & Execute</button>
-        <h3>Query Results</h3>
-        <div id="resultOutput"></div>
+        <header>
+            <h1>AI SQL Agent</h1>
+            <div id="conStatus" class="connection-status">Not Connected</div>
+        </header>
 
-        <!-- Export Query Results Section -->
-        <h3>Export Query Results</h3>
-        <button onclick="exportToCSV()">Export to CSV</button>
-        <button onclick="exportToExcel()">Export to Excel</button>
-        <button onclick="exportToJSON()">Export to JSON</button>
+        <section class="query-container">
+            <div class="input-group">
+                <input type="text" id="queryInput"
+                    placeholder="Ask anything about your data... (e.g., 'Show top 5 users by age')">
+                <button id="btnGenerate" onclick="generateQuery()">
+                    <span class="btn-text">✨ Generate</span>
+                    <span class="loader" style="display: none;"></span>
+                </button>
+            </div>
+            <div id="queryOutputContainer" style="display: none;">
+                <div class="code-block" id="sqlOutput"></div>
+                <div style="display: flex; gap: 10px;">
+                    <button id="btnExecute" onclick="executeSQL()">🚀 Confirm & Execute</button>
+                    <button class="secondary" onclick="clearQuery()">Clear</button>
+                </div>
+            </div>
+        </section>
 
-        <!-- Data Visualization Section -->
-        <h3>Data Visualization</h3>
-        <label for="chartType">Chart Type:</label>
-        <select id="chartType">
-            <option value="bar">Bar Chart</option>
-            <option value="line">Line Chart</option>
-            <option value="pie">Pie Chart</option>
-        </select>
-        <label for="xAxis">X Axis:</label>
-        <select id="xAxis"></select>
-        <label for="yAxis">Y Axis:</label>
-        <select id="yAxis"></select>
-        <button onclick="renderChart()">Update Chart</button>
-        <canvas id="dataChart" width="400" height="200"></canvas>
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('results')">Results</div>
+            <div class="tab" onclick="switchTab('visualization')">Visualization</div>
+            <div class="tab" onclick="switchTab('structure')">Structure</div>
+            <div class="tab" onclick="switchTab('erd')">ER Diagram</div>
+        </div>
 
-        <h3>Table Structure</h3>
-        <div id="tableStructure"></div>
-        <h3>ER Diagram</h3>
-        <div id="erd"></div>
+        <div id="resultsTab" class="tab-content">
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 15px;">
+                <button class="secondary" onclick="exportData('csv')">CSV</button>
+                <button class="secondary" onclick="exportData('excel')">Excel</button>
+                <button class="secondary" onclick="exportData('json')">JSON</button>
+            </div>
+            <div class="table-container" id="resultOutput">
+                <p style="padding: 20px; color: var(--text-muted);">Run a query to see results...</p>
+            </div>
+        </div>
 
-        <div id="importSql">
-            <h3>Import SQL File</h3>
-            <input type="file" id="sqlFileInput" accept=".sql">
-            <button onclick="importSQL()">Import SQL File</button>
-            <p id="importStatus"></p>
+        <div id="visualizationTab" class="tab-content" style="display: none;">
+            <div class="query-container" style="display: flex; gap: 15px; align-items: flex-end;">
+                <div class="form-group">
+                    <label>Chart Type</label>
+                    <select id="chartType">
+                        <option value="bar">Bar Chart</option>
+                        <option value="line">Line Chart</option>
+                        <option value="pie">Pie Chart</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>X Axis</label>
+                    <select id="xAxis"></select>
+                </div>
+                <div class="form-group">
+                    <label>Y Axis</label>
+                    <select id="yAxis"></select>
+                </div>
+                <button class="secondary" onclick="renderChart()">Update Chart</button>
+            </div>
+            <div class="chart-container">
+                <canvas id="dataChart"></canvas>
+            </div>
+        </div>
+
+        <div id="structureTab" class="tab-content" style="display: none;">
+            <div class="table-container" id="tableStructureOutput">
+                <p style="padding: 20px; color: var(--text-muted);">Select a table from the sidebar...</p>
+            </div>
+        </div>
+
+        <div id="erdTab" class="tab-content" style="display: none;">
+            <div class="query-container erd-wrapper">
+                <div id="erdOutput" class="mermaid-container">
+                    <p style="color: var(--text-muted);">Select a database to generate ERD...</p>
+                </div>
+            </div>
         </div>
     </div>
 
-    <!-- Chatbot Interface -->
+    <!-- Connection Modal -->
+    <div id="connectModal" class="modal-overlay" style="display: none;">
+        <div class="modal">
+            <h2>Connect Database</h2>
+            <div class="form-group">
+                <label>Database Type</label>
+                <select id="dbType">
+                    <option value="mysql">MySQL</option>
+                    <option value="postgres">PostgreSQL</option>
+                    <option value="mongodb">MongoDB</option>
+                </select>
+            </div>
+            <div id="standardFields">
+                <div class="form-group">
+                    <label>Host</label>
+                    <input type="text" id="dbHost" value="localhost">
+                </div>
+                <div class="form-group">
+                    <label>Port</label>
+                    <input type="text" id="dbPort" placeholder="Default">
+                </div>
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="dbUser" value="root">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="dbPass"
+                        style="width: 100%; padding: 12px; border-radius: 10px; background: var(--bg-dark); border: 1px solid var(--border); color: white;">
+                </div>
+            </div>
+            <div id="mongoFields" style="display: none;">
+                <div class="form-group">
+                    <label>Connection URI (Optional)</label>
+                    <input type="text" id="dbUri" placeholder="mongodb://localhost:27017">
+                </div>
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button style="flex: 1" onclick="connectDB()">Connect</button>
+                <button class="secondary" onclick="closeModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <div id="chatbot">
-        <div id="chatbotHeader">Chatbot</div>
+        <div id="chatbotHeader">
+            <span>AI Assistant</span>
+            <button class="secondary" onclick="toggleChat()" style="padding: 4px 8px;">_</button>
+        </div>
         <div id="chatbotBody">
-            <div class="message bot">Hello! I'm here to help you understand your database and queries. Ask me anything!</div>
+            <div class="message bot">Hello! I can help you understand your data or refine queries. What's on your mind?
+            </div>
         </div>
         <div id="chatbotInput">
-            <input type="text" id="chatbotMessage" placeholder="Ask me something...">
-            <button onclick="sendChatbotMessage()">Send</button>
+            <input type="text" id="chatMsg" placeholder="Type a message...">
+            <button onclick="sendChat()">Send</button>
         </div>
     </div>
 
     <script>
-        let selectedDatabase = null;
-        let currentSQLQuery = null;
-        let currentTable = null;
-        let currentTableStructure = null;
-        let queryResults = null; // Store query results for chart rendering
+        let currentConfig = null;
+        let selectedDb = null;
+        let selectedTable = null;
+        let queryResults = null;
+        let myChart = null;
 
-        // Function to fetch databases
-        async function fetchDatabases() {
-            try {
-                const response = await fetch("http://localhost:3000/databases");
-                const data = await response.json();
+        const API_BASE = "http://localhost:3002";
 
-                if (data.success) {
-                    const databasesDiv = document.getElementById("databases");
-                    databasesDiv.innerHTML = data.databases.map(db => `
-                        <div class="database" onclick="selectDatabase('${db}')">${db}</div>
-                    `).join("");
-                } else {
-                    console.error("Failed to fetch databases:", data.error);
-                }
-            } catch (error) {
-                console.error("Error fetching databases:", error);
-            }
+        // Navigation
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            const target = document.getElementById(tabId + 'Tab');
+            if (target) target.style.display = 'block';
+            event.currentTarget.classList.add('active');
         }
 
-        async function selectDatabase(database) {
-            selectedDatabase = database;
-            fetchTables(database);
-            fetchERD(database); // Fetch and render ERD
-        }
-
-        async function fetchTables(database) {
-            const response = await fetch(`http://localhost:3000/tables/${database}`);
-            const data = await response.json();
-            const databasesDiv = document.getElementById("databases");
-            databasesDiv.innerHTML += data.tables.map(table => `
-                <div class="table" onclick="fetchTableStructure('${database}', '${table}')">${table}</div>
-            `).join("");
-        }
-
-        async function fetchTableStructure(database, table) {
-            const response = await fetch(`http://localhost:3000/table/${database}/${table}`);
-            const data = await response.json();
-
-            // Update current table and structure
-            currentTable = table;
-            currentTableStructure = data.structure;
-
-            // Display table structure in a table format
-            const tableStructure = document.getElementById("tableStructure");
-            if (data.success && data.structure.length > 0) {
-                tableStructure.innerHTML = `
-                    <h4>Table: ${table}</h4>
-                    ${createTable(data.structure)}
-                `;
+        function toggleLoading(btnId, isLoading) {
+            const btn = document.getElementById(btnId);
+            if (!btn) return;
+            const text = btn.querySelector('.btn-text');
+            const loader = btn.querySelector('.loader');
+            if (isLoading) {
+                if (text) text.style.display = 'none';
+                if (loader) loader.style.display = 'inline-block';
+                btn.disabled = true;
             } else {
-                tableStructure.innerHTML = "<p>No structure found.</p>";
+                if (text) text.style.display = 'inline-block';
+                if (loader) loader.style.display = 'none';
+                btn.disabled = false;
             }
         }
 
-        async function fetchERD(database) {
-            const response = await fetch(`http://localhost:3000/erd/${database}`);
-            const data = await response.json();
+        // Modal Logic
+        document.getElementById('btnConnect').onclick = () => document.getElementById('connectModal').style.display = 'flex';
+        function closeModal() { document.getElementById('connectModal').style.display = 'none'; }
+
+        document.getElementById('dbType').onchange = (e) => {
+            const isMongo = e.target.value === 'mongodb';
+            document.getElementById('standardFields').style.display = isMongo ? 'none' : 'block';
+            document.getElementById('mongoFields').style.display = isMongo ? 'block' : 'none';
+        }
+
+        async function connectDB() {
+            const type = document.getElementById('dbType').value;
+            const config = {
+                type,
+                host: document.getElementById('dbHost').value,
+                port: document.getElementById('dbPort').value,
+                user: document.getElementById('dbUser').value,
+                password: document.getElementById('dbPass').value,
+                uri: document.getElementById('dbUri').value
+            };
+
+            const res = await fetch(`${API_BASE}/connect`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+            const data = await res.json();
 
             if (data.success) {
-                const erdDiv = document.getElementById("erd");
-                erdDiv.innerHTML = `<div class="mermaid">${data.erd}</div>`;
-                mermaid.init(); // Render the ERD
+                currentConfig = config;
+                document.getElementById('conStatus').innerText = `Connected to ${type}`;
+                document.getElementById('conStatus').style.color = 'var(--success)';
+                closeModal();
+                fetchDatabases();
             } else {
-                document.getElementById("erd").innerHTML = "<p>Failed to generate ERD.</p>";
+                alert("Connection failed: " + data.error);
             }
         }
 
-        async function generateSQL() {
-            const query = document.getElementById("queryInput").value;
-            const response = await fetch("http://localhost:3000/query", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ question: query })
+        async function fetchDatabases() {
+            const res = await fetch(`${API_BASE}/databases`);
+            const data = await res.json();
+            if (data.success) {
+                const list = document.getElementById('databasesList');
+                list.innerHTML = data.databases.map(db => `
+                    <div class="database-item" onclick="selectDb('${db}')">${db}</div>
+                `).join('');
+            }
+        }
+
+        async function selectDb(db) {
+            selectedDb = db;
+            document.querySelectorAll('.database-item').forEach(el => {
+                if (el.innerText === db) el.classList.add('active');
+                else el.classList.remove('active');
             });
-            const data = await response.json();
-            document.getElementById("sqlOutput").innerText = data.sql;
-            currentSQLQuery = data.sql; // Update current SQL query
+            fetchTables(db);
+            fetchERD(db);
+        }
+
+        async function fetchTables(db) {
+            const res = await fetch(`${API_BASE}/tables/${db}`);
+            const data = await res.json();
+            if (data.success) {
+                const activeDbEl = document.querySelector('.database-item.active');
+                const existingTables = activeDbEl.querySelectorAll('.table-item');
+                existingTables.forEach(t => t.remove());
+
+                data.tables.forEach(table => {
+                    const tEl = document.createElement('div');
+                    tEl.className = 'table-item';
+                    tEl.innerText = table;
+                    tEl.onclick = (e) => {
+                        e.stopPropagation();
+                        fetchTableStructure(table);
+                    };
+                    activeDbEl.appendChild(tEl);
+                });
+            }
+        }
+
+        async function fetchTableStructure(table) {
+            selectedTable = table;
+            const res = await fetch(`${API_BASE}/table/${selectedDb}/${table}`);
+            const data = await res.json();
+            if (data.success) {
+                renderTable(data.structure, 'tableStructureOutput');
+                switchTab('structure');
+            }
+        }
+
+        async function generateQuery() {
+            const question = document.getElementById('queryInput').value;
+            if (!question) return;
+
+            toggleLoading('btnGenerate', true);
+            try {
+                const res = await fetch(`${API_BASE}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        question,
+                        context: {
+                            dbType: currentConfig ? currentConfig.type : 'mysql',
+                            database: selectedDb,
+                            table: selectedTable
+                        }
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    document.getElementById('queryOutputContainer').style.display = 'block';
+                    document.getElementById('sqlOutput').innerText = data.query;
+                } else {
+                    alert("Query error: " + data.error);
+                }
+            } catch (e) {
+                alert("AI Connection Failed. Make sure server is running on 3001.");
+            } finally {
+                toggleLoading('btnGenerate', false);
+            }
         }
 
         async function executeSQL() {
-            if (!selectedDatabase) {
-                alert("Please select a database first.");
+            const query = document.getElementById('sqlOutput').innerText;
+            toggleLoading('btnExecute', true);
+            try {
+                const res = await fetch(`${API_BASE}/execute`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, database: selectedDb })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    queryResults = data.result;
+                    renderTable(data.result, 'resultOutput');
+                    updateChartSelectors();
+                    switchTab('results');
+                } else {
+                    alert("Execution Error: " + data.error);
+                }
+            } catch (e) {
+                alert("Execution Failed.");
+            } finally {
+                toggleLoading('btnExecute', false);
+            }
+        }
+
+        function renderTable(data, targetId) {
+            const container = document.getElementById(targetId);
+            if (!data || data.length === 0) {
+                container.innerHTML = '<p style="padding: 20px;">No data available.</p>';
                 return;
             }
-
-            const sqlQuery = document.getElementById("sqlOutput").innerText;
-            const response = await fetch("http://localhost:3000/execute", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ sql: sqlQuery, database: selectedDatabase })
-            });
-            const data = await response.json();
-
-            // Display query results in a table format
-            const resultOutput = document.getElementById("resultOutput");
-            if (data.success && data.result.length > 0) {
-                resultOutput.innerHTML = createTable(data.result);
-                queryResults = data.result; // Store query results for chart rendering
-
-                // Populate X and Y axis dropdowns
-                const columns = Object.keys(data.result[0]);
-                const xAxisSelect = document.getElementById("xAxis");
-                const yAxisSelect = document.getElementById("yAxis");
-
-                xAxisSelect.innerHTML = columns.map((col) => `<option value="${col}">${col}</option>`).join("");
-                yAxisSelect.innerHTML = columns.map((col) => `<option value="${col}">${col}</option>`).join("");
-
-                renderChart(); // Render chart based on query results
-            } else {
-                resultOutput.innerHTML = "<p>No results found.</p>";
-                // Clear the chart if no results
-                const chartCanvas = document.getElementById("dataChart");
-                if (chartCanvas) {
-                    chartCanvas.innerHTML = ""; // Clear the chart
-                }
-            }
-        }
-
-        function renderChart() {
-            const chartCanvas = document.getElementById("dataChart");
-            if (!chartCanvas || !queryResults) return;
-
-            // Destroy existing chart instance if it exists
-            if (window.myChart) {
-                window.myChart.destroy();
-            }
-
-            // Get selected chart type and axes
-            const chartType = document.getElementById("chartType").value;
-            const xAxis = document.getElementById("xAxis").value;
-            const yAxis = document.getElementById("yAxis").value;
-
-            // Extract labels and data from the query results
-            const labels = queryResults.map((row) => row[xAxis]);
-            const dataset = queryResults.map((row) => row[yAxis]);
-
-            // Create a new chart
-            window.myChart = new Chart(chartCanvas, {
-                type: chartType, // Use selected chart type
-                data: {
-                    labels: labels,
-                    datasets: [
-                        {
-                            label: yAxis, // Use Y axis column name as label
-                            data: dataset,
-                            backgroundColor: "rgba(75, 192, 192, 0.2)",
-                            borderColor: "rgba(75, 192, 192, 1)",
-                            borderWidth: 1,
-                        },
-                    ],
-                },
-                options: {
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                        },
-                    },
-                },
-            });
-        }
-
-        // Helper function to create an HTML table from an array of objects
-        function createTable(data) {
-            if (data.length === 0) return "<p>No data available.</p>";
-
             const headers = Object.keys(data[0]);
-            const rows = data.map(row => {
-                return `<tr>${headers.map(header => `<td>${row[header]}</td>`).join("")}</tr>`;
-            });
-
-            return `
+            container.innerHTML = `
                 <table>
-                    <thead>
-                        <tr>${headers.map(header => `<th>${header}</th>`).join("")}</tr>
-                    </thead>
+                    <thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead>
                     <tbody>
-                        ${rows.join("")}
+                        ${data.map(row => `<tr>${headers.map(h => `<td>${row[h]}</td>`).join('')}</tr>`).join('')}
                     </tbody>
                 </table>
             `;
         }
 
-        // Export to CSV
-        function exportToCSV() {
-            if (!queryResults || queryResults.length === 0) {
-                alert("No query results to export.");
-                return;
-            }
-
-            const headers = Object.keys(queryResults[0]);
-            const csvContent = [
-                headers.join(","), // Header row
-                ...queryResults.map(row => headers.map(header => row[header]).join(","))
-            ].join("\n");
-
-            const blob = new Blob([csvContent], { type: "text/csv" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = "query_results.csv";
-            a.click();
-            URL.revokeObjectURL(url);
+        function updateChartSelectors() {
+            if (!queryResults || queryResults.length === 0) return;
+            const cols = Object.keys(queryResults[0]);
+            const x = document.getElementById('xAxis');
+            const y = document.getElementById('yAxis');
+            x.innerHTML = cols.map(c => `<option value="${c}">${c}</option>`).join('');
+            y.innerHTML = cols.map(c => `<option value="${c}">${c}</option>`).join('');
         }
 
-        // Export to Excel
-        function exportToExcel() {
-            if (!queryResults || queryResults.length === 0) {
-                alert("No query results to export.");
-                return;
-            }
+        function renderChart() {
+            const ctx = document.getElementById('dataChart').getContext('2d');
+            const type = document.getElementById('chartType').value;
+            const xAttr = document.getElementById('xAxis').value;
+            const yAttr = document.getElementById('yAxis').value;
 
-            const worksheet = XLSX.utils.json_to_sheet(queryResults);
-            const workbook = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(workbook, worksheet, "Query Results");
-            XLSX.writeFile(workbook, "query_results.xlsx");
-        }
+            if (myChart) myChart.destroy();
 
-        // Export to JSON
-        function exportToJSON() {
-            if (!queryResults || queryResults.length === 0) {
-                alert("No query results to export.");
-                return;
-            }
-
-            const jsonContent = JSON.stringify(queryResults, null, 2);
-            const blob = new Blob([jsonContent], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = "query_results.json";
-            a.click();
-            URL.revokeObjectURL(url);
-        }
-
-        // Chatbot functionality
-        async function sendChatbotMessage() {
-            const message = document.getElementById("chatbotMessage").value;
-            if (!message) return;
-
-            // Add user message to chat
-            const chatbotBody = document.getElementById("chatbotBody");
-            chatbotBody.innerHTML += `<div class="message user">${message}</div>`;
-
-            // Clear input
-            document.getElementById("chatbotMessage").value = "";
-
-            // Prepare context for the chatbot
-            const context = {
-                database: selectedDatabase,
-                sqlQuery: currentSQLQuery,
-                table: currentTable,
-                tableStructure: currentTableStructure,
-            };
-
-            // Fetch chatbot response
-            const response = await fetch("http://localhost:3000/chatbot", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message, context }),
-            });
-            const data = await response.json();
-
-            // Add bot response to chat
-            if (data.success) {
-                chatbotBody.innerHTML += `<div class="message bot">${data.response}</div>`;
-            } else {
-                chatbotBody.innerHTML += `<div class="message bot">Error: ${data.error}</div>`;
-            }
-
-            // Scroll to bottom of chat
-            chatbotBody.scrollTop = chatbotBody.scrollHeight;
-        }
-
-        // Function to import SQL file
-        async function importSQL() {
-            const fileInput = document.getElementById("sqlFileInput");
-            const file = fileInput.files[0];
-
-            if (!file) {
-                alert("Please select an SQL file to upload.");
-                return;
-            }
-
-            const formData = new FormData();
-            formData.append("sqlFile", file);
-            formData.append("database", selectedDatabase);
-
-            const importStatus = document.getElementById("importStatus");
-
-            try {
-                const response = await fetch("http://localhost:3000/import-sql", {
-                    method: "POST",
-                    body: formData,
-                });
-                const data = await response.json();
-
-                if (data.success) {
-                    importStatus.innerText = "SQL file imported and executed successfully.";
-                } else {
-                    importStatus.innerText = `Error: ${data.error}`;
+            myChart = new Chart(ctx, {
+                type,
+                data: {
+                    labels: queryResults.map(r => r[xAttr]),
+                    datasets: [{
+                        label: yAttr,
+                        data: queryResults.map(r => r[yAttr]),
+                        backgroundColor: 'rgba(99, 102, 241, 0.5)',
+                        borderColor: '#6366f1',
+                        borderWidth: 2
+                    }]
                 }
-            } catch (error) {
-                console.error("Import Error:", error);
-                importStatus.innerText = "Failed to import SQL file.";
+            });
+            switchTab('visualization');
+        }
+
+        async function fetchERD(db) {
+            const res = await fetch(`${API_BASE}/erd/${db}`);
+            const data = await res.json();
+            if (data.success && data.erd) {
+                const out = document.getElementById('erdOutput');
+                out.innerHTML = `<div class="mermaid">${data.erd}</div>`;
+                mermaid.init();
             }
         }
 
-        // Call fetchDatabases on page load
-        fetchDatabases();
+        async function sendChat() {
+            const msg = document.getElementById('chatMsg').value;
+            if (!msg) return;
+            const body = document.getElementById('chatbotBody');
+            body.innerHTML += `<div class="message user">${msg}</div>`;
+            document.getElementById('chatMsg').value = '';
+
+            const res = await fetch(`${API_BASE}/chatbot`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: msg,
+                    context: { database: selectedDb, table: selectedTable }
+                })
+            });
+            const data = await res.json();
+            body.innerHTML += `<div class="message bot">${data.response}</div>`;
+            body.scrollTop = body.scrollHeight;
+        }
+
+        window.onload = () => {
+            mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+        };
     </script>
 </body>
+
 </html>

@@ -1,10 +1,13 @@
 import express from "express";
 import cors from "cors";
 import mysql from "mysql2/promise";
+import pkg from 'pg';
+const { Pool: PgPool } = pkg;
+import { MongoClient } from "mongodb";
 import dotenv from "dotenv";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import multer from "multer"; // For handling file uploads
-import fs from "fs"; // For reading the uploaded file
+import multer from "multer";
+import fs from "fs";
 
 dotenv.config();
 const app = express();
@@ -13,275 +16,338 @@ app.use(express.json());
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Create a connection pool for MySQL
-const pool = mysql.createPool({
-    host: process.env.DB_HOST || "localhost",
-    user: process.env.DB_USER || "root",
-    password: process.env.DB_PASSWORD || "",
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
-});
+// --- Database Connection Manager ---
+class DBManager {
+    constructor() {
+        this.mysqlPool = null;
+        this.pgPool = null;
+        this.mongoClient = null;
+        this.currentConfig = null;
+    }
 
-// Function to generate SQL from English input
-async function generateSQL(question) {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro-latest" });
-    const prompt = `Convert the following English query into a valid MySQL query. Return only the SQL query, with no explanations or markdown formatting. Question: ${question}`;
-    
-    try {
-        const result = await model.generateContent(prompt);
-        let text = result.response?.candidates?.[0]?.content?.parts?.[0]?.text;
+    async connect(config) {
+        this.currentConfig = config;
+        const { type, host, user, password, database, port } = config;
 
-        if (!text) throw new Error("Failed to extract SQL from Gemini response.");
+        try {
+            if (type === "mysql") {
+                if (this.mysqlPool) await this.mysqlPool.end();
+                this.mysqlPool = mysql.createPool({
+                    host,
+                    user,
+                    password,
+                    database,
+                    port: port || 3306,
+                    waitForConnections: true,
+                    connectionLimit: 10,
+                });
+                // Test connection
+                await this.mysqlPool.getConnection().then(conn => conn.release());
+            } else if (type === "postgres") {
+                if (this.pgPool) await this.pgPool.end();
+                this.pgPool = new PgPool({
+                    host,
+                    user,
+                    password,
+                    database,
+                    port: port || 5432,
+                });
+                // Test connection
+                await this.pgPool.query("SELECT 1");
+            } else if (type === "mongodb") {
+                if (this.mongoClient) await this.mongoClient.close();
+                const uri = config.uri || `mongodb://${user}:${password}@${host}:${port || 27017}/${database}`;
+                this.mongoClient = new MongoClient(uri);
+                await this.mongoClient.connect();
+            }
+            return { success: true };
+        } catch (error) {
+            console.error(`Error connecting to ${type}:`, error);
+            throw error;
+        }
+    }
 
-        text = text.replace(/```sql/g, "").replace(/```/g, "").trim();
-        
-        return text;
-    } catch (error) {
-        console.error("Gemini API Error:", error);
-        throw new Error("Gemini API failed to generate SQL.");
+    async getDatabases() {
+        const { type } = this.currentConfig;
+        if (type === "mysql") {
+            const [rows] = await this.mysqlPool.query("SHOW DATABASES");
+            return rows.map(row => row.Database);
+        } else if (type === "postgres") {
+            const res = await this.pgPool.query("SELECT datname FROM pg_database WHERE datistemplate = false");
+            return res.rows.map(row => row.datname);
+        } else if (type === "mongodb") {
+            const res = await this.mongoClient.db().admin().listDatabases();
+            return res.databases.map(db => db.name);
+        }
+    }
+
+    async getTables(database) {
+        const { type } = this.currentConfig;
+        if (type === "mysql") {
+            const connection = await this.mysqlPool.getConnection();
+            await connection.changeUser({ database });
+            const [rows] = await connection.query("SHOW TABLES");
+            connection.release();
+            return rows.map(row => row[Object.keys(row)[0]]);
+        } else if (type === "postgres") {
+            // For Postgres, we might need a separate client to switch DBs or just use the current one if it's the right DB
+            const res = await this.pgPool.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'");
+            return res.rows.map(row => row.table_name);
+        } else if (type === "mongodb") {
+            const db = this.mongoClient.db(database);
+            const collections = await db.listCollections().toArray();
+            return collections.map(c => c.name);
+        }
+    }
+
+    async getTableStructure(database, table) {
+        const { type } = this.currentConfig;
+        if (type === "mysql") {
+            const connection = await this.mysqlPool.getConnection();
+            await connection.changeUser({ database });
+            const [rows] = await connection.query(`DESCRIBE ${table}`);
+            connection.release();
+            return rows;
+        } else if (type === "postgres") {
+            const res = await this.pgPool.query(`
+                SELECT column_name as "Field", data_type as "Type", is_nullable as "Null"
+                FROM information_schema.columns
+                WHERE table_name = $1
+            `, [table]);
+            return res.rows;
+        } else if (type === "mongodb") {
+            const db = this.mongoClient.db(database);
+            const doc = await db.collection(table).findOne();
+            if (!doc) return [];
+            return Object.keys(doc).map(key => ({ Field: key, Type: typeof doc[key] }));
+        }
+    }
+
+    async executeQuery(query, database) {
+        const { type } = this.currentConfig;
+        if (type === "mysql") {
+            const connection = await this.mysqlPool.getConnection();
+            if (database) await connection.changeUser({ database });
+            const [rows] = await connection.query(query);
+            connection.release();
+            return rows;
+        } else if (type === "postgres") {
+            const res = await this.pgPool.query(query);
+            return res.rows;
+        } else if (type === "mongodb") {
+            // MongoDB queries will be sent as JSON strings representing the operation
+            const db = this.mongoClient.db(database);
+            const q = JSON.parse(query);
+            const collection = db.collection(q.collection);
+            let result;
+            if (q.operation === "find") {
+                result = await collection.find(q.filter || {}).toArray();
+            } else if (q.operation === "aggregate") {
+                result = await collection.aggregate(q.pipeline || []).toArray();
+            } else if (q.operation === "insertOne") {
+                result = await collection.insertOne(q.document);
+            }
+            // Add more operations as needed
+            return result;
+        }
+    }
+
+    async getERD(database) {
+        const { type } = this.currentConfig;
+        if (type === "mongodb") return "ERD not supported for MongoDB";
+        try {
+            const tableNames = await this.getTables(database);
+            const tablesWithFields = [];
+            const relationships = [];
+
+            for (const table of tableNames) {
+                const fields = await this.getTableStructure(database, table);
+                tablesWithFields.push({ table, fields });
+
+                if (type === "mysql") {
+                    const [rows] = await this.mysqlPool.query(`
+                        SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
+                        FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+                        WHERE TABLE_SCHEMA = ? AND REFERENCED_TABLE_NAME IS NOT NULL AND TABLE_NAME = ?
+                    `, [database, table]);
+                    relationships.push(...rows);
+                } else if (type === "postgres") {
+                    const res = await this.pgPool.query(`
+                        SELECT kcu.table_name as "TABLE_NAME", kcu.column_name as "COLUMN_NAME", 
+                               rel_tco.table_name AS "REFERENCED_TABLE_NAME", rel_kcu.column_name AS "REFERENCED_COLUMN_NAME"
+                        FROM information_schema.table_constraints tco
+                        JOIN information_schema.key_column_usage kcu ON tco.constraint_name = kcu.constraint_name
+                        JOIN information_schema.referential_constraints rco ON tco.constraint_name = rco.constraint_name
+                        JOIN information_schema.table_constraints rel_tco ON rco.unique_constraint_name = rel_tco.constraint_name
+                        JOIN information_schema.key_column_usage rel_kcu ON rel_tco.constraint_name = rel_kcu.constraint_name
+                        WHERE tco.constraint_type = 'FOREIGN KEY' AND tco.table_name = $1
+                    `, [table]);
+                    relationships.push(...res.rows);
+                }
+            }
+            return generateMermaidERD(tablesWithFields, relationships);
+        } catch (error) {
+            console.error("ERD Generation Error:", error);
+            throw error;
+        }
     }
 }
 
-// Endpoint to convert English to SQL
-app.post("/query", async (req, res) => {
-    const { question } = req.body;
-    
-    if (!question) {
-        return res.status(400).json({ success: false, error: "Question is required." });
+const dbManager = new DBManager();
+
+// --- Gemini Query Generation ---
+async function generateQuery(question, context) {
+    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+    const { dbType, database, table, structure } = context;
+
+    let dialectPrompt = "";
+    if (dbType === "mysql") dialectPrompt = "MySQL query";
+    else if (dbType === "postgres") dialectPrompt = "PostgreSQL query";
+    else if (dbType === "mongodb") {
+        dialectPrompt = `MongoDB query in JSON format. 
+        Example: {"collection": "users", "operation": "find", "filter": {"age": {"$gt": 20}}} 
+        Wait, only provide the JSON object.`;
     }
 
+    const prompt = `
+        Convert the following English question into a valid ${dialectPrompt}.
+        Database Context:
+        - DB Type: ${dbType}
+        - Database Name: ${database || "unknown"}
+        - Current Table: ${table || "unknown"}
+        - Schema Info: ${structure ? JSON.stringify(structure) : "Not provided"}
+
+        Question: ${question}
+
+        Return ONLY the query code. No markdown, no explanations.
+    `;
+
     try {
-        const sqlQuery = await generateSQL(question);
-        res.json({ success: true, sql: sqlQuery, message: "Generated SQL successfully. Confirm before execution." });
+        const result = await model.generateContent(prompt);
+        let text = result.response?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) throw new Error("Failed to extract query from Gemini response.");
+        text = text.replace(/```json/g, "").replace(/```sql/g, "").replace(/```/g, "").trim();
+        return text;
+    } catch (error) {
+        console.error("Gemini Error:", error);
+        throw new Error("AI failed to generate query.");
+    }
+}
+
+// --- Endpoints ---
+
+app.post("/connect", async (req, res) => {
+    try {
+        await dbManager.connect(req.body);
+        res.json({ success: true, message: "Connected successfully" });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// Endpoint to execute the SQL query in MySQL
+app.post("/query", async (req, res) => {
+    const { question, context } = req.body;
+    try {
+        const query = await generateQuery(question, context);
+        res.json({ success: true, query });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 app.post("/execute", async (req, res) => {
-    const { sql, database } = req.body;
-    
-    if (!sql || !database) {
-        return res.status(400).json({ success: false, error: "SQL query and database are required." });
-    }
-
-    let connection;
+    const { query, database } = req.body;
     try {
-        connection = await pool.getConnection();
-        await connection.changeUser({ database });
-
-        const [rows] = await connection.query(sql);
-        res.json({ success: true, result: rows });
+        const result = await dbManager.executeQuery(query, database);
+        res.json({ success: true, result });
     } catch (error) {
-        console.error("MySQL Error:", error);
-        res.json({ success: false, error: error.message });
-    } finally {
-        if (connection) connection.release();
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// Endpoint to fetch databases
 app.get("/databases", async (req, res) => {
-    let connection;
     try {
-        connection = await pool.getConnection();
-        const [rows] = await connection.query("SHOW DATABASES");
-        res.json({ success: true, databases: rows.map(row => row.Database) });
+        const databases = await dbManager.getDatabases();
+        res.json({ success: true, databases });
     } catch (error) {
-        console.error("MySQL Error:", error);
-        res.json({ success: false, error: error.message });
-    } finally {
-        if (connection) connection.release();
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// Endpoint to fetch tables in a database
 app.get("/tables/:database", async (req, res) => {
-    const { database } = req.params;
-    let connection;
     try {
-        connection = await pool.getConnection();
-        await connection.changeUser({ database });
-
-        const [rows] = await connection.query("SHOW TABLES");
-        res.json({ success: true, tables: rows.map(row => row[`Tables_in_${database}`]) });
+        const tables = await dbManager.getTables(req.params.database);
+        res.json({ success: true, tables });
     } catch (error) {
-        console.error("MySQL Error:", error);
-        res.json({ success: false, error: error.message });
-    } finally {
-        if (connection) connection.release();
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// Endpoint to fetch table structure
 app.get("/table/:database/:table", async (req, res) => {
-    const { database, table } = req.params;
-    let connection;
     try {
-        connection = await pool.getConnection();
-        await connection.changeUser({ database });
-
-        const [rows] = await connection.query(`DESCRIBE ${table}`);
-        res.json({ success: true, structure: rows });
+        const structure = await dbManager.getTableStructure(req.params.database, req.params.table);
+        res.json({ success: true, structure });
     } catch (error) {
-        console.error("MySQL Error:", error);
-        res.json({ success: false, error: error.message });
-    } finally {
-        if (connection) connection.release();
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// Endpoint to generate ERD
 app.get("/erd/:database", async (req, res) => {
-    const { database } = req.params;
-    let connection;
-
     try {
-        connection = await pool.getConnection();
-        await connection.changeUser({ database });
-
-        // Fetch all tables
-        const [tables] = await connection.query("SHOW TABLES");
-        const tableNames = tables.map(row => row[`Tables_in_${database}`]);
-
-        // Fetch table fields and relationships
-        const tablesWithFields = [];
-        const relationships = [];
-
-        for (const table of tableNames) {
-            // Fetch table fields
-            const [fields] = await connection.query(`DESCRIBE ${table}`);
-            tablesWithFields.push({ table, fields });
-
-            // Fetch foreign key relationships
-            const [rows] = await connection.query(`
-                SELECT 
-                    TABLE_NAME,
-                    COLUMN_NAME,
-                    REFERENCED_TABLE_NAME,
-                    REFERENCED_COLUMN_NAME
-                FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
-                WHERE TABLE_SCHEMA = ? AND REFERENCED_TABLE_NAME IS NOT NULL
-            `, [database]);
-
-            relationships.push(...rows);
-        }
-
-        // Generate Mermaid ERD syntax
-        const erd = generateMermaidERD(tablesWithFields, relationships);
+        const erd = await dbManager.getERD(req.params.database);
         res.json({ success: true, erd });
     } catch (error) {
-        console.error("ERD Generation Error:", error);
         res.status(500).json({ success: false, error: error.message });
-    } finally {
-        if (connection) connection.release();
     }
 });
 
-// Helper function to generate Mermaid ERD syntax
+app.post("/chatbot", async (req, res) => {
+    const { message, context } = req.body;
+    try {
+        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+        const prompt = `
+            Context: ${JSON.stringify(context)}
+            Question: ${message}
+            Provide a helpful explanation based on the context.
+        `;
+        const result = await model.generateContent(prompt);
+        res.json({ success: true, response: result.response.text() });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Helper for ERD
 function generateMermaidERD(tablesWithFields, relationships) {
+    if (tablesWithFields.length === 0) return "erDiagram\n    EMPTY_DB";
+
     let erd = "erDiagram\n";
-
-    // Add tables with fields
     for (const { table, fields } of tablesWithFields) {
-        // Escape table names with backticks if they contain special characters
-        const escapedTable = table.includes(" ") || table.includes("-") ? `\`${table}\`` : table;
+        // Sanitize table name: replace spaces/hyphens with underscores, or quote if necessary
+        const escapedTable = table.replace(/[^a-zA-Z0-9]/g, "_");
         erd += `    ${escapedTable} {\n`;
-
-        // Add fields
         for (const field of fields) {
-            // Escape field names with backticks if they contain special characters
-            const escapedField = field.Field.includes(" ") || field.Field.includes("-") ? `\`${field.Field}\`` : field.Field;
-            // Simplify field types (e.g., remove parentheses for Mermaid compatibility)
-            const simplifiedType = field.Type.replace(/\(.*\)/, ""); // Remove parentheses and their contents
-            erd += `        ${simplifiedType} ${escapedField}\n`;
+            // Simplify types for Mermaid and sanitize names
+            const type = (field.Type || "unknown").split("(")[0].replace(/[^a-zA-Z0-9]/g, "_");
+            const name = (field.Field || field.column_name || "unknown").replace(/[^a-zA-Z0-9]/g, "_");
+            erd += `        ${type} ${name}\n`;
         }
         erd += `    }\n`;
     }
 
-    // Add relationships
+    const seenRels = new Set();
     for (const rel of relationships) {
-        // Escape table names with backticks if they contain special characters
-        const escapedTable = rel.TABLE_NAME.includes(" ") || rel.TABLE_NAME.includes("-") ? `\`${rel.TABLE_NAME}\`` : rel.TABLE_NAME;
-        const escapedRefTable = rel.REFERENCED_TABLE_NAME.includes(" ") || rel.REFERENCED_TABLE_NAME.includes("-") ? `\`${rel.REFERENCED_TABLE_NAME}\`` : rel.REFERENCED_TABLE_NAME;
+        const t1 = rel.TABLE_NAME.replace(/[^a-zA-Z0-9]/g, "_");
+        const t2 = rel.REFERENCED_TABLE_NAME.replace(/[^a-zA-Z0-9]/g, "_");
+        const relKey = `${t1}-${t2}`;
 
-        erd += `    ${escapedTable} ||--o{ ${escapedRefTable} : "${rel.COLUMN_NAME} -> ${rel.REFERENCED_COLUMN_NAME}"\n`;
+        if (!seenRels.has(relKey)) {
+            erd += `    ${t1} ||--o{ ${t2} : "fk"\n`;
+            seenRels.add(relKey);
+        }
     }
-
     return erd;
 }
 
-// Endpoint for the chatbot
-app.post("/chatbot", async (req, res) => {
-    const { message, context } = req.body;
-
-    if (!message) {
-        return res.status(400).json({ success: false, error: "Message is required." });
-    }
-
-    try {
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro-latest" });
-        
-        // Include context in the prompt
-        const prompt = `
-            Context:
-            - Selected Database: ${context.database || "None"}
-            - Current SQL Query: ${context.sqlQuery || "None"}
-            - Current Table: ${context.table || "None"}
-            - Table Structure: ${context.tableStructure ? JSON.stringify(context.tableStructure) : "None"}
-
-            Question: ${message}
-
-            Explain or answer the question based on the above context.
-        `;
-
-        const result = await model.generateContent(prompt);
-        let text = result.response?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-        if (!text) throw new Error("Failed to generate a response from Gemini.");
-
-        res.json({ success: true, response: text });
-    } catch (error) {
-        console.error("Chatbot Error:", error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-const upload = multer({ dest: "uploads/" }); // Files will be temporarily stored in the "uploads" folder
-
-// Endpoint to import and execute an SQL file
-app.post("/import-sql", upload.single("sqlFile"), async (req, res) => {
-    const { database } = req.body;
-    const filePath = req.file.path; // Path to the uploaded file
-
-    if (!database) {
-        return res.status(400).json({ success: false, error: "Database is required." });
-    }
-
-    let connection;
-    try {
-        // Read the SQL file
-        const sqlContent = fs.readFileSync(filePath, "utf8");
-
-        // Connect to the database
-        connection = await pool.getConnection();
-        await connection.changeUser({ database });
-
-        // Execute the SQL statements
-        await connection.query(sqlContent);
-
-        res.json({ success: true, message: "SQL file imported and executed successfully." });
-    } catch (error) {
-        console.error("SQL Import Error:", error);
-        res.status(500).json({ success: false, error: error.message });
-    } finally {
-        if (connection) connection.release();
-        // Delete the uploaded file after processing
-        fs.unlinkSync(filePath);
-    }
-});
-
-// Start the server
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3002;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

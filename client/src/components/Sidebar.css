@@ -1,0 +1,64 @@
+.sidebar {
+    width: 280px;
+    background: var(--bg-card);
+    backdrop-filter: blur(12px);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    transition: all 0.3s ease;
+}
+
+.sidebar h3 {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.2rem;
+    margin-bottom: 20px;
+    color: var(--primary);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.db-list {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.database-item {
+    padding: 12px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    background: var(--glass);
+    border: 1px solid transparent;
+    transition: all 0.2s;
+}
+
+.database-item:hover {
+    border-color: var(--primary);
+    background: rgba(99, 102, 241, 0.1);
+}
+
+.database-item.active {
+    background: var(--primary);
+    color: white;
+}
+
+.table-item {
+    margin-left: 15px;
+    padding: 8px 12px;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-left: 1px solid var(--border);
+}
+
+.table-item:hover {
+    color: var(--text-main);
+    border-left-color: var(--primary);
+}
+
+.connect-btn {
+    margin-top: 20px;
+    width: 100%;
+}
