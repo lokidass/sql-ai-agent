@@ -60,7 +60,17 @@ const ConnectionModal = ({ isOpen, onClose }) => {
                         </select>
                     </div>
 
-                    {dbType !== 'mongodb' ? (
+                    {dbType === 'mongodb' || (dbType === 'postgres' && formData.useConnectionString) ? (
+                        <div className="form-group">
+                            <label>Connection URI</label>
+                            <input
+                                type="text"
+                                placeholder={dbType === 'postgres' ? "postgresql://user:password@host/dbname?sslmode=require" : "mongodb://localhost:27017"}
+                                value={formData.uri}
+                                onChange={(e) => setFormData({ ...formData, uri: e.target.value })}
+                            />
+                        </div>
+                    ) : (
                         <>
                             <div className="form-group">
                                 <label>Host</label>
@@ -95,28 +105,30 @@ const ConnectionModal = ({ isOpen, onClose }) => {
                                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                                 />
                             </div>
-                            {dbType === 'postgres' && (
-                                <div className="form-group checkbox-group">
-                                    <label>
-                                        <input
-                                            type="checkbox"
-                                            checked={formData.ssl || false}
-                                            onChange={(e) => setFormData({ ...formData, ssl: e.target.checked })}
-                                        />
-                                        Enable SSL (Required for Remote/Neon/Supabase)
-                                    </label>
-                                </div>
-                            )}
                         </>
-                    ) : (
-                        <div className="form-group">
-                            <label>Connection URI (Optional)</label>
-                            <input
-                                type="text"
-                                placeholder="mongodb://localhost:27017"
-                                value={formData.uri}
-                                onChange={(e) => setFormData({ ...formData, uri: e.target.value })}
-                            />
+                    )}
+
+                    {dbType === 'postgres' && (
+                        <div className="form-group checkbox-group" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '10px' }}>
+                            <label>
+                                <input
+                                    type="checkbox"
+                                    checked={formData.useConnectionString || false}
+                                    onChange={(e) => setFormData({ ...formData, useConnectionString: e.target.checked })}
+                                />
+                                Use Connection String (Best for Neon/Supabase)
+                            </label>
+
+                            {!formData.useConnectionString && (
+                                <label>
+                                    <input
+                                        type="checkbox"
+                                        checked={formData.ssl || false}
+                                        onChange={(e) => setFormData({ ...formData, ssl: e.target.checked })}
+                                    />
+                                    Enable SSL (Required for Remote)
+                                </label>
+                            )}
                         </div>
                     )}
 

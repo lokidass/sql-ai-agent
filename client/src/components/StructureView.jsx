@@ -60,15 +60,18 @@ const StructureView = () => {
             <div className="tables-list">
                 <h3>Tables</h3>
                 <ul>
-                    {tables.map((table) => (
-                        <li
-                            key={table}
-                            onClick={() => handleTableClick(table)}
-                            className={selectedTable === table ? 'active' : ''}
-                        >
-                            <span className="icon">📄</span> {table}
-                        </li>
-                    ))}
+                    {tables.map((table) => {
+                        const tableName = typeof table === 'object' ? table.name : table;
+                        return (
+                            <li
+                                key={tableName}
+                                onClick={() => handleTableClick(tableName)}
+                                className={selectedTable === tableName ? 'active' : ''}
+                            >
+                                <span className="icon">📄</span> {tableName}
+                            </li>
+                        );
+                    })}
                 </ul>
             </div>
             <div className="table-details">

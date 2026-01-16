@@ -28,7 +28,7 @@ ChartJS.register(
 );
 
 const VisualizationView = () => {
-    const { queryResults } = useApp();
+    const { queryResults, loading } = useApp();
     const [chartType, setChartType] = useState('bar');
     const [xAxis, setXAxis] = useState('');
     const [yAxis, setYAxis] = useState('');
@@ -40,7 +40,7 @@ const VisualizationView = () => {
 
     useEffect(() => {
         if (columns.length > 0) {
-            // Smart defaults: First string col for X, first number col for Y
+            // Smart defaults
             const firstString = columns.find(key => typeof queryResults[0][key] === 'string') || columns[0];
             const firstNumber = columns.find(key => typeof queryResults[0][key] === 'number') || columns[1] || columns[0];
 
@@ -49,8 +49,16 @@ const VisualizationView = () => {
         }
     }, [columns, queryResults]);
 
-    if (!queryResults || queryResults.length === 0) {
-        return <div className="placeholder-text">No data to visualize. Run a query first.</div>;
+    if (loading) {
+        return <div className="loader-container"><div className="loader"></div><div>Loading Visualization Data...</div></div>;
+    }
+
+    if (!queryResults || !Array.isArray(queryResults) || queryResults.length === 0) {
+        return <div className="placeholder-text">No data to visualize. Select a table or run a query.</div>;
+    }
+
+    if (!xAxis || !yAxis) {
+        return <div className="placeholder-text">Configuring visualization...</div>;
     }
 
     const chartData = {

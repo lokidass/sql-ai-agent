@@ -45,14 +45,25 @@ class DBManager {
                 await this.mysqlPool.getConnection().then(conn => conn.release());
             } else if (type === "postgres") {
                 if (this.pgPool) await this.pgPool.end();
-                this.pgPool = new PgPool({
-                    host,
-                    user,
-                    password,
-                    database,
-                    port: port || 5432,
-                    ssl: ssl ? { rejectUnauthorized: false } : false,
-                });
+
+                let pgConfig;
+                if (config.useConnectionString && config.uri) {
+                    pgConfig = {
+                        connectionString: config.uri,
+                        ssl: { rejectUnauthorized: false } // Neon typically needs this
+                    };
+                } else {
+                    pgConfig = {
+                        host,
+                        user,
+                        password,
+                        database,
+                        port: port || 5432,
+                        ssl: ssl ? { rejectUnauthorized: false } : false,
+                    };
+                }
+
+                this.pgPool = new PgPool(pgConfig);
                 // Test connection
                 await this.pgPool.query("SELECT 1");
             } else if (type === "mongodb") {
@@ -112,17 +123,36 @@ class DBManager {
         if (type === "mysql") {
             const connection = await this.mysqlPool.getConnection();
             await connection.changeUser({ database });
-            const [rows] = await connection.query("SHOW TABLES");
+            // Use SHOW TABLE STATUS to get row counts efficently
+            const [rows] = await connection.query("SHOW TABLE STATUS");
             connection.release();
-            return rows.map(row => row[Object.keys(row)[0]]);
+            return rows.map(row => ({ name: row.Name, count: row.Rows || 0 }));
         } else if (type === "postgres") {
-            // For Postgres, we might need a separate client to switch DBs or just use the current one if it's the right DB
-            const res = await this.pgPool.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'");
-            return res.rows.map(row => row.table_name);
+            // Get table names safely from information_schema, and try to add counts
+            const res = await this.pgPool.query(`
+                SELECT 
+                    t.table_name as name, 
+                    COALESCE(s.n_live_tup, 0) as count
+                FROM information_schema.tables t
+                LEFT JOIN pg_stat_user_tables s ON t.table_name = s.relname
+                WHERE t.table_schema = 'public'
+                ORDER BY t.table_name
+            `);
+            console.log(`[Postgres] Found ${res.rows.length} tables`);
+            if (res.rows.length > 0) console.log(`[Postgres] First table:`, res.rows[0]);
+
+            return res.rows.map(row => ({ name: row.name, count: parseInt(row.count) || 0 }));
         } else if (type === "mongodb") {
             const db = this.mongoClient.db(database);
             const collections = await db.listCollections().toArray();
-            return collections.map(c => c.name);
+
+            // Get counts in parallel
+            const tablesWithCounts = await Promise.all(collections.map(async (c) => {
+                const count = await db.collection(c.name).estimatedDocumentCount();
+                return { name: c.name, count };
+            }));
+
+            return tablesWithCounts;
         }
     }
 
@@ -146,6 +176,30 @@ class DBManager {
             const doc = await db.collection(table).findOne();
             if (!doc) return [];
             return Object.keys(doc).map(key => ({ Field: key, Type: typeof doc[key] }));
+        }
+    }
+
+    async getTableData(database, table) {
+        const { type } = this.currentConfig;
+        let query;
+
+        if (type === "mysql") {
+            query = `SELECT * FROM \`${table}\` LIMIT 50`;
+            const connection = await this.mysqlPool.getConnection();
+            if (database) await connection.changeUser({ database });
+            const [rows] = await connection.query(query);
+            connection.release();
+            return rows;
+        } else if (type === "postgres") {
+            // Use double quotes for Postgres identifiers to handle case sensitivity
+            query = `SELECT * FROM "${table}" LIMIT 50`;
+            console.log(`[Postgres] fetching data for table: ${table} query: ${query}`);
+            const res = await this.pgPool.query(query);
+            console.log(`[Postgres] data fetched. rows: ${res.rows.length}`);
+            return res.rows;
+        } else if (type === "mongodb") {
+            const db = this.mongoClient.db(database);
+            return await db.collection(table).find({}).limit(50).toArray();
         }
     }
 
@@ -182,7 +236,8 @@ class DBManager {
         const { type } = this.currentConfig;
         if (type === "mongodb") return "ERD not supported for MongoDB";
         try {
-            const tableNames = await this.getTables(database);
+            const tablesInfo = await this.getTables(database);
+            const tableNames = tablesInfo.map(t => t.name);
             const tablesWithFields = [];
             const relationships = [];
 
@@ -229,7 +284,7 @@ async function generateQuery(question, context) {
 
     let dialectPrompt = "";
     if (dbType === "mysql") dialectPrompt = "MySQL query";
-    else if (dbType === "postgres") dialectPrompt = "PostgreSQL query";
+    else if (dbType === "postgres") dialectPrompt = "PostgreSQL query. IMPORTANT: You MUST use double quotes around ALL table names and column names to distinguish them (e.g., \"Admission\" instead of Admission).";
     else if (dbType === "mongodb") {
         dialectPrompt = `MongoDB query in JSON format. 
         Example: {"collection": "users", "operation": "find", "filter": {"age": {"$gt": 20}}} 
@@ -299,9 +354,11 @@ app.post("/query", async (req, res) => {
 app.post("/execute", async (req, res) => {
     const { query, database } = req.body;
     try {
+        console.log(`Executing Query: ${query} on DB: ${database}`);
         const result = await dbManager.executeQuery(query, database);
         res.json({ success: true, result });
     } catch (error) {
+        console.error("Execution Error:", error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
@@ -328,6 +385,15 @@ app.get("/table/:database/:table", async (req, res) => {
     try {
         const structure = await dbManager.getTableStructure(req.params.database, req.params.table);
         res.json({ success: true, structure });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+app.get("/table-data/:database/:table", async (req, res) => {
+    try {
+        const data = await dbManager.getTableData(req.params.database, req.params.table);
+        res.json({ success: true, data });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }

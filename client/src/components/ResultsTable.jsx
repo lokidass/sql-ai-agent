@@ -23,9 +23,13 @@ const ResultsTable = () => {
                 <tbody>
                     {queryResults.map((row, idx) => (
                         <tr key={idx}>
-                            {headers.map((header) => (
-                                <td key={header}>{row[header]}</td>
-                            ))}
+                            {headers.map((header) => {
+                                const cellValue = row[header];
+                                const renderValue = (typeof cellValue === 'object' && cellValue !== null)
+                                    ? JSON.stringify(cellValue)
+                                    : cellValue;
+                                return <td key={header}>{renderValue}</td>;
+                            })}
                         </tr>
                     ))}
                 </tbody>

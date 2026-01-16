@@ -44,6 +44,11 @@ export const getERD = async (database) => {
     return response.data;
 };
 
+export const getTableData = async (database, table) => {
+    const response = await api.get(`/table-data/${database}/${table}`);
+    return response.data;
+};
+
 export const sendChatMessage = async (message, context) => {
     const response = await api.post('/chatbot', { message, context });
     return response.data;
