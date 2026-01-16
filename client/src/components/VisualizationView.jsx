@@ -42,10 +42,10 @@ const VisualizationView = () => {
         if (columns.length > 0) {
             // Smart defaults: First string col for X, first number col for Y
             const firstString = columns.find(key => typeof queryResults[0][key] === 'string') || columns[0];
-            const firstNumber = columns.find(key => typeof queryResults[0][key] === 'number');
+            const firstNumber = columns.find(key => typeof queryResults[0][key] === 'number') || columns[1] || columns[0];
 
             setXAxis(firstString);
-            if (firstNumber) setYAxis(firstNumber);
+            setYAxis(firstNumber);
         }
     }, [columns, queryResults]);
 

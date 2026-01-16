@@ -224,7 +224,7 @@ const dbManager = new DBManager();
 // --- Gemini Query Generation ---
 // --- Gemini Query Generation ---
 async function generateQuery(question, context) {
-    const modelsToTry = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-flash-latest", "gemini-2.0-flash-exp"];
+    const modelsToTry = ["gemini-flash-latest", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash"];
     const { dbType, database, table, structure } = context;
 
     let dialectPrompt = "";
@@ -345,7 +345,7 @@ app.get("/erd/:database", async (req, res) => {
 app.post("/chatbot", async (req, res) => {
     const { message, context } = req.body;
     try {
-        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
         const prompt = `
             Context: ${JSON.stringify(context)}
             Question: ${message}

@@ -1,9 +1,9 @@
 import { useApp } from '../context/AppContext';
-import { getTables, getTableStructure } from '../services/api';
+import { getTables, getTableStructure, executeQuery } from '../services/api';
 import './Sidebar.css';
 
 const Sidebar = ({ onConnectClick }) => {
-    const { databases, selectedDb, setSelectedDb, tables, setTables, setSelectedTable, setActiveTab } = useApp();
+    const { databases, selectedDb, setSelectedDb, tables, setTables, setSelectedTable, setActiveTab, setQueryResults } = useApp();
 
     const handleSelectDb = async (db) => {
         setSelectedDb(db);
@@ -19,11 +19,23 @@ const Sidebar = ({ onConnectClick }) => {
 
     const handleSelectTable = async (table) => {
         setSelectedTable(table);
-        setActiveTab('structure'); // Auto-switch to structure view
+        setActiveTab('visualization'); // Auto-switch to visualization view
+
         try {
+            // First get structure (optional but good for context)
             await getTableStructure(selectedDb, table);
+
+            // Fetch data for visualization
+            const query = `SELECT * FROM ${table} LIMIT 50`;
+            const result = await executeQuery(query, selectedDb);
+
+            if (result.success) {
+                setQueryResults(result.result);
+            } else {
+                console.error("Failed to fetch table data for visualization:", result.error);
+            }
         } catch (error) {
-            console.error('Error fetching table structure:', error);
+            console.error('Error fetching table data:', error);
         }
     };
 
