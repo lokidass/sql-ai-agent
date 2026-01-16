@@ -1,0 +1,27 @@
+.erd-container {
+    height: 100%;
+    overflow: auto;
+    background-color: var(--bg-secondary);
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+}
+
+.loader-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 15px;
+    color: var(--text-secondary);
+}
+
+.error-text {
+    color: #ff6b6b;
+    text-align: center;
+    margin-top: 40px;
+}

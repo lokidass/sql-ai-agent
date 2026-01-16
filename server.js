@@ -27,7 +27,7 @@ class DBManager {
 
     async connect(config) {
         this.currentConfig = config;
-        const { type, host, user, password, database, port } = config;
+        const { type, host, user, password, database, port, ssl } = config;
 
         try {
             if (type === "mysql") {
@@ -51,6 +51,7 @@ class DBManager {
                     password,
                     database,
                     port: port || 5432,
+                    ssl: ssl ? { rejectUnauthorized: false } : false,
                 });
                 // Test connection
                 await this.pgPool.query("SELECT 1");
@@ -66,6 +67,31 @@ class DBManager {
             throw error;
         }
     }
+
+    // ... (rest of DBManager methods remain unchanged but need to be careful with replace)
+    // To safe complexity, I'll only replace the top part until connect ends, but I need to ensure I don't cut off other methods.
+    // Wait, replace_file_content replaces a BLOCK. I need to be precise.
+    // I will use two separate replace calls if needed or just replace the class start and connect method.
+
+    async getDatabases() {
+        const { type } = this.currentConfig;
+        if (type === "mysql") {
+            const [rows] = await this.mysqlPool.query("SHOW DATABASES");
+            return rows.map(row => row.Database);
+        } else if (type === "postgres") {
+            const res = await this.pgPool.query("SELECT datname FROM pg_database WHERE datistemplate = false");
+            return res.rows.map(row => row.datname);
+        } else if (type === "mongodb") {
+            const res = await this.mongoClient.db().admin().listDatabases();
+            return res.databases.map(db => db.name);
+        }
+    }
+
+    // ... getTables, getTableStructure, executeQuery, getERD ...
+    // Since I cannot use "..." in replacement, I must stick to editing `connect` specifically or use multi_replace.
+    // Let's use multi_replace for safer edits.
+    // Methods continuing inside DBManager class...
+
 
     async getDatabases() {
         const { type } = this.currentConfig;
@@ -196,8 +222,9 @@ class DBManager {
 const dbManager = new DBManager();
 
 // --- Gemini Query Generation ---
+// --- Gemini Query Generation ---
 async function generateQuery(question, context) {
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+    const modelsToTry = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-flash-latest", "gemini-2.0-flash-exp"];
     const { dbType, database, table, structure } = context;
 
     let dialectPrompt = "";
@@ -222,16 +249,30 @@ async function generateQuery(question, context) {
         Return ONLY the query code. No markdown, no explanations.
     `;
 
-    try {
-        const result = await model.generateContent(prompt);
-        let text = result.response?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!text) throw new Error("Failed to extract query from Gemini response.");
-        text = text.replace(/```json/g, "").replace(/```sql/g, "").replace(/```/g, "").trim();
-        return text;
-    } catch (error) {
-        console.error("Gemini Error:", error);
-        throw new Error("AI failed to generate query.");
+    // Try multiple models
+    for (const modelName of modelsToTry) {
+        try {
+            console.log(`Trying model: ${modelName}...`);
+            const model = genAI.getGenerativeModel({ model: modelName });
+
+            console.log("Sending Prompt to Gemini:", prompt.substring(0, 100) + "..."); // Short log
+            const result = await model.generateContent(prompt);
+            console.log(`SUCCESS with ${modelName}`);
+
+            let text = result.response?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!text) continue; // Try next model if response is empty
+
+            text = text.replace(/```json/g, "").replace(/```sql/g, "").replace(/```/g, "").trim();
+            console.log("Sanitized Query:", text);
+            return text;
+
+        } catch (error) {
+            console.warn(`Failed with ${modelName}:`, error.message.split(']')[0] + ']');
+            // Continue to next model
+        }
     }
+
+    throw new Error("AI failed to generate query with all attempted models.");
 }
 
 // --- Endpoints ---
@@ -304,7 +345,7 @@ app.get("/erd/:database", async (req, res) => {
 app.post("/chatbot", async (req, res) => {
     const { message, context } = req.body;
     try {
-        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
         const prompt = `
             Context: ${JSON.stringify(context)}
             Question: ${message}

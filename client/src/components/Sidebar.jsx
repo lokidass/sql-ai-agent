@@ -3,7 +3,7 @@ import { getTables, getTableStructure } from '../services/api';
 import './Sidebar.css';
 
 const Sidebar = ({ onConnectClick }) => {
-    const { databases, selectedDb, setSelectedDb, tables, setTables, setSelectedTable } = useApp();
+    const { databases, selectedDb, setSelectedDb, tables, setTables, setSelectedTable, setActiveTab } = useApp();
 
     const handleSelectDb = async (db) => {
         setSelectedDb(db);
@@ -19,6 +19,7 @@ const Sidebar = ({ onConnectClick }) => {
 
     const handleSelectTable = async (table) => {
         setSelectedTable(table);
+        setActiveTab('structure'); // Auto-switch to structure view
         try {
             await getTableStructure(selectedDb, table);
         } catch (error) {

@@ -51,3 +51,20 @@
     margin-bottom: 8px;
     font-weight: 500;
 }
+
+.error-banner {
+    background-color: rgba(245, 54, 92, 0.1);
+    border: 1px solid var(--danger-color);
+    color: var(--danger-color);
+    padding: 12px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.error-banner::before {
+    content: '⚠️';
+}

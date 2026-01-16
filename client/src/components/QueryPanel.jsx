@@ -8,11 +8,13 @@ const QueryPanel = () => {
     const [question, setQuestion] = useState('');
     const [loading, setLoading] = useState(false);
     const [lastQuery, setLastQuery] = useState('');
+    const [error, setError] = useState(null);
 
     const handleSend = async () => {
         if (!question) return;
 
         setLoading(true);
+        setError(null);
         try {
             const context = {
                 dbType: currentConfig?.type || 'mysql',
@@ -23,7 +25,7 @@ const QueryPanel = () => {
             // Generate query
             const genResult = await generateQuery(question, context);
             if (!genResult.success) {
-                alert('Query generation error: ' + genResult.error);
+                setError('Query generation error: ' + genResult.error);
                 setLoading(false);
                 return;
             }
@@ -36,10 +38,12 @@ const QueryPanel = () => {
                 setQueryResults(execResult.result);
                 setActiveTab('results');
             } else {
-                alert('Execution Error: ' + execResult.error);
+                setError('Execution Error: ' + execResult.error);
             }
         } catch (error) {
-            alert('Connection Failed. Make sure server is running on port 3002.');
+            console.error("Query Error:", error);
+            const errorMessage = error.response?.data?.error || error.message || 'Connection Failed';
+            setError(errorMessage);
         } finally {
             setLoading(false);
         }
@@ -63,6 +67,8 @@ const QueryPanel = () => {
                     )}
                 </button>
             </div>
+
+            {error && <div className="error-banner">{error}</div>}
 
             {lastQuery && (
                 <div className="query-output-container">

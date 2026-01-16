@@ -13,11 +13,14 @@ const ConnectionModal = ({ isOpen, onClose }) => {
         password: '',
         uri: '',
     });
+    const [status, setStatus] = useState({ loading: false, error: null });
 
     if (!isOpen) return null;
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        setStatus({ loading: true, error: null });
+
         try {
             const config = { type: dbType, ...formData };
             const result = await connectDB(config);
@@ -30,10 +33,14 @@ const ConnectionModal = ({ isOpen, onClose }) => {
                 }
                 onClose();
             } else {
-                alert('Connection failed: ' + result.error);
+                setStatus({ loading: false, error: result.error || 'Connection failed' });
             }
         } catch (error) {
-            alert('Connection error: ' + error.message);
+            console.error("Connection Error:", error);
+            const errorMessage = error.response?.data?.error || error.message || 'Network error';
+            setStatus({ loading: false, error: errorMessage });
+        } finally {
+            if (!status.error) setStatus(prev => ({ ...prev, loading: false }));
         }
     };
 
@@ -41,6 +48,8 @@ const ConnectionModal = ({ isOpen, onClose }) => {
         <div className="modal-overlay" onClick={onClose}>
             <div className="modal" onClick={(e) => e.stopPropagation()}>
                 <h2>Connect Database</h2>
+                {status.error && <div className="error-message">{status.error}</div>}
+
                 <form onSubmit={handleSubmit}>
                     <div className="form-group">
                         <label>Database Type</label>
@@ -86,6 +95,18 @@ const ConnectionModal = ({ isOpen, onClose }) => {
                                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                                 />
                             </div>
+                            {dbType === 'postgres' && (
+                                <div className="form-group checkbox-group">
+                                    <label>
+                                        <input
+                                            type="checkbox"
+                                            checked={formData.ssl || false}
+                                            onChange={(e) => setFormData({ ...formData, ssl: e.target.checked })}
+                                        />
+                                        Enable SSL (Required for Remote/Neon/Supabase)
+                                    </label>
+                                </div>
+                            )}
                         </>
                     ) : (
                         <div className="form-group">
@@ -100,10 +121,10 @@ const ConnectionModal = ({ isOpen, onClose }) => {
                     )}
 
                     <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
-                        <button type="submit" style={{ flex: 1 }}>
-                            Connect
+                        <button type="submit" style={{ flex: 1 }} disabled={status.loading}>
+                            {status.loading ? 'Connecting...' : 'Connect'}
                         </button>
-                        <button type="button" className="secondary" onClick={onClose}>
+                        <button type="button" className="secondary" onClick={onClose} disabled={status.loading}>
                             Cancel
                         </button>
                     </div>
