@@ -3,7 +3,7 @@ import { getTables, getTableStructure, executeQuery, getTableData } from '../ser
 import './Sidebar.css';
 
 const Sidebar = ({ onConnectClick }) => {
-    const { databases, selectedDb, setSelectedDb, tables, setTables, setSelectedTable, setActiveTab, setQueryResults } = useApp();
+    const { databases, selectedDb, setSelectedDb, tables, setTables, setSelectedTable, setActiveTab, setQueryResults, setLoading } = useApp();
 
     const handleSelectDb = async (db) => {
         setSelectedDb(db);

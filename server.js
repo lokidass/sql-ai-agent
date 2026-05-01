@@ -322,7 +322,7 @@ async function generateQuery(question, context) {
             return text;
 
         } catch (error) {
-            console.warn(`Failed with ${modelName}:`, error.message.split(']')[0] + ']');
+            console.error(`Failed with ${modelName}:`, error);
             // Continue to next model
         }
     }
